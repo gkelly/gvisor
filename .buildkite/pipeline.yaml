@@ -24,6 +24,7 @@ _templates:
   platform_specific_agents: &platform_specific_agents {}
   kvm_agents: &kvm_agents {kvm: "true"}
   ubuntu_agents: &ubuntu_agents {os: "ubuntu"}
+  cos_gpu_agents: &cos_gpu_agents {os: "cos", gpu: "true"}
   docker: &docker
     env:
       BUILDKITE_PIPELINE_INSTALL_RUNTIME: true
@@ -276,6 +277,14 @@ steps:
       <<: *ubuntu_agents
       arch: "amd64"
       cgroup: "v2"
+  - <<: *common
+    <<: *docker
+    label: ":tensorflow: GPU tests"
+    command: make cos-gpu-tests
+    agents:
+      <<: *cos_gpu_agents
+      arch: "amd64"
+    soft_fail: true
   - <<: *common
     <<: *docker
     label: ":goggles: Overlay tests"
