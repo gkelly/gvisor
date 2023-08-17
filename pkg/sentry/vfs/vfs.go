@@ -47,6 +47,7 @@ import (
 	"gvisor.dev/gvisor/pkg/errors/linuxerr"
 	"gvisor.dev/gvisor/pkg/eventchannel"
 	"gvisor.dev/gvisor/pkg/fspath"
+	"gvisor.dev/gvisor/pkg/refs"
 	"gvisor.dev/gvisor/pkg/sentry/fsmetric"
 	"gvisor.dev/gvisor/pkg/sentry/kernel/auth"
 	"gvisor.dev/gvisor/pkg/sentry/socket/unix/transport"
@@ -144,6 +145,8 @@ type VirtualFilesystem struct {
 	// mountPromises contains all unresolved mount promises.
 	mountPromisesMu sync.RWMutex `state:"nosave"`
 	mountPromises   map[VirtualDentry]*waiter.Queue
+
+	toDecRef map[refs.RefCounter]int
 }
 
 // Init initializes a new VirtualFilesystem with no mounts or FilesystemTypes.
@@ -161,6 +164,7 @@ func (vfs *VirtualFilesystem) Init(ctx context.Context) error {
 	vfs.mounts.Init()
 	vfs.groupIDBitmap = bitmap.New(1024)
 	vfs.mountPromises = make(map[VirtualDentry]*waiter.Queue)
+	vfs.toDecRef = make(map[refs.RefCounter]int)
 
 	// Construct vfs.anonMount.
 	anonfsDevMinor, err := vfs.GetAnonBlockDevMinor()
@@ -959,6 +963,51 @@ func (vfs *VirtualFilesystem) maybeResolveMountPromise(vd VirtualDentry) {
 	}
 	wq.Notify(waiter.EventOut)
 	delete(vfs.mountPromises, vd)
+}
+
+// PopDelayedDecRefs returns a list of reference counted objects that collected
+// while mountMu was held that must be DecRef'd outside of mountMu.
+//
+// +checklocks:vfs.mountMu
+func (vfs *VirtualFilesystem) PopDelayedDecRefs() []refs.RefCounter {
+	var rcs []refs.RefCounter
+	for rc, refs := range vfs.toDecRef {
+		for i := 0; i < refs; i++ {
+			rcs = append(rcs, rc)
+		}
+	}
+	return rcs
+}
+
+// +checklocks:vfs.mountMu
+func (vfs *VirtualFilesystem) delayDecRef(rc refs.RefCounter) {
+	if _, ok := vfs.toDecRef[rc]; !ok {
+		vfs.toDecRef[rc] = 1
+		return
+	}
+	vfs.toDecRef[rc]++
+}
+
+// Use this instead of vfs.mountMu.Lock().
+//
+// +checklocksacquire:vfs.mountMu
+func (vfs *VirtualFilesystem) lockMounts() {
+	vfs.mountMu.Lock()
+}
+
+// Use this instead of vfs.mountMu.Unlock(). This method DecRefs any reference
+// counted objects that were collected while mountMu was held.
+//
+// +checklocksrelease:vfs.mountMu
+func (vfs *VirtualFilesystem) unlockMounts(ctx context.Context) {
+	toDecRef := vfs.toDecRef
+	vfs.toDecRef = map[refs.RefCounter]int{}
+	vfs.mountMu.Unlock()
+	for rc, refs := range toDecRef {
+		for i := 0; i < refs; i++ {
+			rc.DecRef(ctx)
+		}
+	}
 }
 
 // A VirtualDentry represents a node in a VFS tree, by combining a Dentry
