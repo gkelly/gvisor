@@ -54,4 +54,6 @@ func resetTest() {
 	initialized.Store(false)
 	allMetrics = makeMetricSet()
 	emitter.Reset()
+	profilingMetricsStarted.Store(false)
+	stopProfilingMetrics = make(chan bool, 1)
 }
