@@ -63,13 +63,13 @@ enable compatibility. Here, we document the ideal workflow.
 Run a container:
 
 ```bash
-docker run [options] --runtime=runsc <image>`
+docker run [options] --runtime=runsc <image>
 ```
 
 Checkpoint a container:
 
 ```bash
-docker checkpoint create <container> <checkpoint_name>`
+docker checkpoint create <container> <checkpoint_name>
 ```
 
 Create a new container into which to restore:
